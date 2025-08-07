@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import html2canvas from "html2canvas-pro";
+import { snapdom } from "@zumer/snapdom";
 
 export default function Home() {
   const [success, setSuccess] = useState(false);
@@ -23,6 +23,16 @@ export default function Home() {
   const [viewportWidth, setViewportWidth] = useState(1920);
   const [viewportHeight, setViewportHeight] = useState(1080);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [imageFormat, setImageFormat] = useState<
+    "png" | "jpg" | "jpeg" | "webp"
+  >("png");
+  const [imageQuality, setImageQuality] = useState<"low" | "medium" | "high">(
+    "medium"
+  );
+  const [captureResult, setCaptureResult] = useState<{
+    toBlob: (options?: any) => Promise<Blob>;
+    download: (options?: any) => Promise<void>;
+  } | null>(null);
 
   // Cleanup function
   useEffect(() => {
@@ -44,18 +54,13 @@ export default function Home() {
       baseTag.href = base.origin;
       doc.head.insertBefore(baseTag, doc.head.firstChild);
 
-      // Process all elements with relative URLs
+      // Process all elements with relative URLs (non-img elements)
       const processRelativeUrl = (element: Element, attribute: string) => {
         const value = element.getAttribute(attribute);
         if (value?.startsWith("/")) {
           element.setAttribute(attribute, `${base.origin}${value}`);
         }
       };
-
-      // Handle images
-      doc.querySelectorAll('img[src^="/"]').forEach((img) => {
-        processRelativeUrl(img, "src");
-      });
 
       // Handle scripts
       doc.querySelectorAll('script[src^="/"]').forEach((script) => {
@@ -74,6 +79,21 @@ export default function Home() {
         processRelativeUrl(link, "href");
       });
 
+      // Combine logic for images: detect any relative URLs and add prefix
+      doc.querySelectorAll("img").forEach((img) => {
+        let src = img.getAttribute("src");
+        if (src) {
+          // If src is relative (doesn't start with "http://" or "https://"), convert to absolute
+          if (!src.startsWith("http://") && !src.startsWith("https://")) {
+            src = `${base.origin}/${src.replace(/^\/+/, "")}`;
+          }
+          // SnapDOM will handle CORS with useProxy option, so we don't need to manually prefix
+          img.crossOrigin = "anonymous";
+          img.setAttribute("src", src);
+          console.log(src);
+        }
+      });
+
       return doc.documentElement.outerHTML;
     } catch (err) {
       console.error("Error processing HTML:", err);
@@ -86,6 +106,7 @@ export default function Home() {
     setLoading(true);
     setSuccess(false);
     setScreenshot(null);
+    setCaptureResult(null);
 
     try {
       const response = await fetch(`https://proxy.corsfix.com/?${url}`);
@@ -106,36 +127,62 @@ export default function Home() {
 
     try {
       const iframe = contentRef.current;
-      const element = iframe.contentWindow?.document.querySelector("body");
+      const element =
+        iframe.contentWindow?.document.querySelector("body") ||
+        iframe.contentDocument?.documentElement ||
+        iframe;
       console.log("about to be rendered: ", element);
-      const canvas = await html2canvas(element, {
-        allowTaint: true,
-        useCORS: true,
-        foreignObjectRendering: true,
-        logging: true,
+
+      // Convert quality setting to numeric value
+      const qualityValue =
+        imageQuality === "low" ? 0.3 : imageQuality === "medium" ? 0.7 : 0.9;
+
+      // Use SnapDOM to capture the element
+      const result = await snapdom(element, {
         width: viewportWidth,
         height: viewportHeight,
+        useProxy: "https://proxy.corsfix.com/?",
+        backgroundColor: "#fff",
+        embedFonts: true,
+        compress: true,
+        fast: true,
+        quality: qualityValue,
       });
 
-      // Convert canvas to blob
-      canvas.toBlob((blob) => {
-        if (blob) {
-          // Cleanup previous objectUrl
-          if (objectUrl) {
-            URL.revokeObjectURL(objectUrl);
-          }
+      // Store the result for potential download
+      setCaptureResult(result);
 
-          // Create new object URL
-          const newObjectUrl = URL.createObjectURL(blob);
-          setObjectUrl(newObjectUrl);
-          setScreenshot(newObjectUrl);
-          setSuccess(true);
-        }
-      }, "image/png");
+      // Convert to blob with the selected format
+      const blob = await result.toBlob({ type: imageFormat });
+
+      // Cleanup previous objectUrl
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+
+      // Create new object URL
+      const newObjectUrl = URL.createObjectURL(blob);
+      setObjectUrl(newObjectUrl);
+      setScreenshot(newObjectUrl);
+      setSuccess(true);
     } catch (error) {
       console.error("Screenshot error:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!captureResult) return;
+
+    try {
+      // Use SnapDOM's built-in download functionality
+      await captureResult.download({
+        format: imageFormat,
+        filename: `screenshot-${Date.now()}`,
+      });
+    } catch (error) {
+      console.error("Download error:", error);
     }
   };
 
@@ -165,13 +212,18 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Image format</Label>
-                  <Select defaultValue="jpeg">
+                  <Select
+                    defaultValue="png"
+                    onValueChange={(value: "png" | "jpg" | "jpeg" | "webp") =>
+                      setImageFormat(value)
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="jpeg">JPEG</SelectItem>
                       <SelectItem value="png">PNG</SelectItem>
+                      <SelectItem value="jpg">JPG</SelectItem>
                       <SelectItem value="webp">WebP</SelectItem>
                     </SelectContent>
                   </Select>
@@ -179,7 +231,12 @@ export default function Home() {
 
                 <div className="space-y-2">
                   <Label>Image quality</Label>
-                  <Select defaultValue="medium">
+                  <Select
+                    defaultValue="medium"
+                    onValueChange={(value: "low" | "medium" | "high") =>
+                      setImageQuality(value)
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -219,20 +276,31 @@ export default function Home() {
               </Button>
 
               {success && (
-                <div className="flex items-center gap-2 border rounded-lg p-4">
-                  <div className="bg-green-100 rounded-full p-1">
-                    <Check className="w-5 h-5 text-green-600" />
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 border rounded-lg p-4">
+                    <div className="bg-green-100 rounded-full p-1">
+                      <Check className="w-5 h-5 text-green-600" />
+                    </div>
+                    <span className="font-medium">Success!</span>
+                    <div className="ml-auto text-xs text-muted-foreground">
+                      <a href="#" className="hover:underline">
+                        Privacy
+                      </a>
+                      {" · "}
+                      <a href="#" className="hover:underline">
+                        Terms
+                      </a>
+                    </div>
                   </div>
-                  <span className="font-medium">Success!</span>
-                  <div className="ml-auto text-xs text-muted-foreground">
-                    <a href="#" className="hover:underline">
-                      Privacy
-                    </a>
-                    {" · "}
-                    <a href="#" className="hover:underline">
-                      Terms
-                    </a>
-                  </div>
+
+                  <Button
+                    onClick={handleDownload}
+                    className="w-full"
+                    variant="outline"
+                    disabled={!captureResult}
+                  >
+                    Download Screenshot
+                  </Button>
                 </div>
               )}
             </form>
@@ -258,7 +326,7 @@ export default function Home() {
             style={{ position: "absolute", top: "-9999px" }}
             width={viewportWidth}
             height={viewportHeight}
-            sandbox="allow-same-origin"
+            sandbox="allow-same-origin allow-scripts"
           />
         </div>
       </div>
