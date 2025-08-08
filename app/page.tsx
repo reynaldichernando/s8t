@@ -18,7 +18,7 @@ export default function Home() {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
-  const [url, setUrl] = useState("https://www.google.com/");
+  const [url, setUrl] = useState("https://www.apple.com/");
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const contentRef = useRef<HTMLIFrameElement>(null);
