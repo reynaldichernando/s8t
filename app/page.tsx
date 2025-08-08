@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { WIDTH_BREAKPOINTS, WidthBreakpoint } from "@/lib/width";
 import { Check, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ export default function Home() {
   const [imageQuality, setImageQuality] = useState<"low" | "medium" | "high">(
     "medium"
   );
+  const [width, setWidth] = useState<WidthBreakpoint>(1280);
 
   const processHtml = (html: string, baseUrl: string) => {
     try {
@@ -129,6 +131,12 @@ export default function Home() {
     try {
       const iframe = contentRef.current;
 
+      iframe.width = width.toString();
+      const scale = window.innerWidth / iframe.offsetWidth;
+      iframe.style.transform = `scale(${scale})`;
+      iframe.style.transformOrigin = "top left";
+      iframe.style.marginBottom = `calc(${scale} - 1) * 100%)`;
+
       iframe.height = window.innerHeight.toString();
       if (iframe.contentWindow?.document.body) {
         const contentHeight = iframe.contentWindow.document.body.scrollHeight;
@@ -197,7 +205,7 @@ export default function Home() {
       <iframe
         ref={contentRef}
         onLoad={handleIframeLoad}
-        className="w-full min-h-screen"
+        className="min-h-screen"
         sandbox="allow-same-origin"
       />
 
@@ -234,6 +242,26 @@ export default function Home() {
               </div>
 
               <div className="grid grid-cols-1 gap-4">
+                <div className="space-y-2">
+                  <Label>Width</Label>
+                  <Select
+                    defaultValue={width.toString()}
+                    onValueChange={(value) =>
+                      setWidth(Number(value) as WidthBreakpoint)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WIDTH_BREAKPOINTS.map((bp) => (
+                        <SelectItem key={bp} value={bp.toString()}>
+                          {bp}px
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="space-y-2">
                   <Label>Image format</Label>
                   <Select
