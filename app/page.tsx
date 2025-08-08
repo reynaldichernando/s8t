@@ -33,16 +33,18 @@ export default function Home() {
       const doc = parser.parseFromString(html, "text/html");
       const base = new URL(baseUrl);
 
-      // Add base tag
       const baseTag = doc.createElement("base");
       baseTag.href = base.origin;
       doc.head.insertBefore(baseTag, doc.head.firstChild);
 
-      // Process all elements with relative URLs (non-img elements)
       const processRelativeUrl = (element: Element, attribute: string) => {
         const value = element.getAttribute(attribute);
-        if (value?.startsWith("/")) {
-          element.setAttribute(attribute, `${base.origin}${value}`);
+        if (value && !value.startsWith("http")) {
+          if (value.startsWith("/")) {
+            element.setAttribute(attribute, `${base.origin}${value}`);
+          } else {
+            element.setAttribute(attribute, `${base.origin}/${value}`);
+          }
         }
       };
 
@@ -60,6 +62,10 @@ export default function Home() {
         } else {
           link.remove();
         }
+      });
+
+      doc.querySelectorAll("a").forEach((anchor) => {
+        anchor.removeAttribute("href");
       });
 
       doc.documentElement.style.overflowY = "hidden";
