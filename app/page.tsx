@@ -317,7 +317,7 @@ export default function Home() {
               </a>{" "}
               •{" "}
               <a
-                href="https://github.com/corsfix/s8t"
+                href="https://github.com/reynaldichernando/s8t"
                 className="font-medium hover:underline"
               >
                 source code
