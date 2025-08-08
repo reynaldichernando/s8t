@@ -19,6 +19,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [url, setUrl] = useState("https://www.google.com/");
+  const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const contentRef = useRef<HTMLIFrameElement>(null);
   const [imageFormat, setImageFormat] = useState<"png" | "jpg" | "webp">("png");
@@ -73,9 +74,17 @@ export default function Home() {
   const fetchAndRenderWebsite = useCallback(async (targetUrl: string) => {
     setLoading(true);
     setSuccess(false);
+    setError(null);
 
     try {
       const response = await fetch(`https://proxy.corsfix.com/?${targetUrl}`);
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load website: ${response.status} ${response.statusText}`
+        );
+      }
+
       const html = await response.text();
       const processedHtml = processHtml(html, targetUrl);
 
@@ -84,6 +93,11 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Fetch error:", error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load the website. Please check the URL and try again."
+      );
       setLoading(false);
     }
   }, []);
@@ -141,7 +155,7 @@ export default function Home() {
 
       // Use SnapDOM to capture the element
       const result = await snapdom(element, {
-        useProxy: "https://proxy.corsfix.com/?",
+        useProxy: "https://proxy.corsfix.com/?url=",
         backgroundColor: "#fff",
         embedFonts: true,
         compress: true,
@@ -154,9 +168,15 @@ export default function Home() {
       await result.download({
         format: imageFormat,
         filename: `screenshot-${Date.now()}`,
+        useProxy: "https://proxy.corsfix.com/?url=",
       });
     } catch (error) {
       console.error("Download error:", error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to download screenshot. Please try again."
+      );
     } finally {
       setDownloadLoading(false);
     }
@@ -169,6 +189,7 @@ export default function Home() {
         onLoad={handleIframeLoad}
         width={window.innerWidth}
         className="min-h-screen"
+        sandbox="allow-same-origin"
       />
 
       <button
@@ -246,6 +267,15 @@ export default function Home() {
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Rendering..." : "Render"}
               </Button>
+
+              {error && (
+                <div className="flex items-center gap-2 border border-red-200 rounded-lg p-4 bg-red-50">
+                  <div className="bg-red-100 rounded-full p-1">
+                    <X className="w-5 h-5 text-red-600" />
+                  </div>
+                  <span className="font-medium text-red-800">{error}</span>
+                </div>
+              )}
 
               {success && (
                 <div className="space-y-4">
