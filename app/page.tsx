@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Check } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Check, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,31 +17,16 @@ import { snapdom } from "@zumer/snapdom";
 export default function Home() {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [url, setUrl] = useState("");
-  const [screenshot, setScreenshot] = useState<string | null>(null);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [url, setUrl] = useState("https://example.com");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const contentRef = useRef<HTMLIFrameElement>(null);
-  const [viewportWidth, setViewportWidth] = useState(1920);
-  const [viewportHeight, setViewportHeight] = useState(1080);
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [imageFormat, setImageFormat] = useState<
     "png" | "jpg" | "jpeg" | "webp"
   >("png");
   const [imageQuality, setImageQuality] = useState<"low" | "medium" | "high">(
     "medium"
   );
-  const [captureResult, setCaptureResult] = useState<{
-    toBlob: (options?: any) => Promise<Blob>;
-    download: (options?: any) => Promise<void>;
-  } | null>(null);
-
-  // Cleanup function
-  useEffect(() => {
-    return () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [objectUrl]);
 
   const processHtml = (html: string, baseUrl: string) => {
     try {
@@ -62,56 +47,46 @@ export default function Home() {
         }
       };
 
-      // Handle scripts
-      doc.querySelectorAll('script[src^="/"]').forEach((script) => {
-        processRelativeUrl(script, "src");
+      doc.querySelectorAll("script").forEach((script) => {
+        script.remove();
       });
 
-      // Handle stylesheets
-      doc
-        .querySelectorAll('link[rel="stylesheet"][href^="/"]')
-        .forEach((link) => {
-          processRelativeUrl(link, "href");
-        });
+      doc.querySelectorAll("meta").forEach((meta) => {
+        meta.remove();
+      });
 
-      // Handle other resources (fonts, etc.)
-      doc.querySelectorAll('link[href^="/"]').forEach((link) => {
+      doc.querySelectorAll("link").forEach((link) => {
         processRelativeUrl(link, "href");
       });
 
-      // Combine logic for images: detect any relative URLs and add prefix
-      doc.querySelectorAll("img").forEach((img) => {
-        let src = img.getAttribute("src");
-        if (src) {
-          // If src is relative (doesn't start with "http://" or "https://"), convert to absolute
-          if (!src.startsWith("http://") && !src.startsWith("https://")) {
-            src = `${base.origin}/${src.replace(/^\/+/, "")}`;
-          }
-          // SnapDOM will handle CORS with useProxy option, so we don't need to manually prefix
-          img.crossOrigin = "anonymous";
-          img.setAttribute("src", src);
-          console.log(src);
-        }
+      // Move all children from head to body (just before returning)
+      const headChildren = Array.from(doc.head.children);
+      headChildren.forEach((child) => {
+        doc.body.insertBefore(child, doc.body.firstChild);
       });
 
-      return doc.documentElement.outerHTML;
+      // Remove the head element
+      doc.head.remove();
+
+      const cleanHTML = doc.documentElement.outerHTML;
+
+      console.log(cleanHTML);
+
+      return cleanHTML;
     } catch (err) {
       console.error("Error processing HTML:", err);
       return html;
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const fetchAndRenderWebsite = useCallback(async (targetUrl: string) => {
     setLoading(true);
     setSuccess(false);
-    setScreenshot(null);
-    setCaptureResult(null);
 
     try {
-      const response = await fetch(`https://proxy.corsfix.com/?${url}`);
+      const response = await fetch(`https://proxy.corsfix.com/?${targetUrl}`);
       const html = await response.text();
-      const processedHtml = processHtml(html, url);
+      const processedHtml = processHtml(html, targetUrl);
 
       if (contentRef.current) {
         contentRef.current.srcdoc = processedHtml;
@@ -120,6 +95,18 @@ export default function Home() {
       console.error("Fetch error:", error);
       setLoading(false);
     }
+  }, []);
+
+  // Auto-fetch example.com on component mount
+  useEffect(() => {
+    fetchAndRenderWebsite("https://example.com");
+  }, [fetchAndRenderWebsite]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+
+    await fetchAndRenderWebsite(url);
   };
 
   const handleIframeLoad = async () => {
@@ -127,11 +114,42 @@ export default function Home() {
 
     try {
       const iframe = contentRef.current;
-      const element =
-        iframe.contentWindow?.document.querySelector("body") ||
-        iframe.contentDocument?.documentElement ||
-        iframe;
-      console.log("about to be rendered: ", element);
+
+      // Dynamic height adjustment based on content
+      const resizeIframe = () => {
+        if (iframe.contentWindow?.document.body) {
+          const contentHeight = iframe.contentWindow.document.body.scrollHeight;
+          // Only resize if content is taller than current iframe
+          if (contentHeight > iframe.offsetHeight) {
+            iframe.height = contentHeight + "px";
+          }
+        }
+      };
+
+      // Resize after a short delay to ensure content is fully loaded
+      setTimeout(resizeIframe, 100);
+
+      // Just mark as successfully loaded, but don't capture yet
+      setSuccess(true);
+    } catch (error) {
+      console.error("Iframe load error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!contentRef.current) return;
+
+    setDownloadLoading(true);
+
+    try {
+      const iframe = contentRef.current;
+      const element = iframe.contentDocument?.documentElement;
+
+      if (!element) {
+        throw new Error("Could not access iframe content");
+      }
 
       // Convert quality setting to numeric value
       const qualityValue =
@@ -139,8 +157,6 @@ export default function Home() {
 
       // Use SnapDOM to capture the element
       const result = await snapdom(element, {
-        width: viewportWidth,
-        height: viewportHeight,
         useProxy: "https://proxy.corsfix.com/?",
         backgroundColor: "#fff",
         embedFonts: true,
@@ -149,55 +165,48 @@ export default function Home() {
         quality: qualityValue,
       });
 
-      // Store the result for potential download
-      setCaptureResult(result);
-
-      // Convert to blob with the selected format
-      const blob = await result.toBlob({ type: imageFormat });
-
-      // Cleanup previous objectUrl
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-
-      // Create new object URL
-      const newObjectUrl = URL.createObjectURL(blob);
-      setObjectUrl(newObjectUrl);
-      setScreenshot(newObjectUrl);
-      setSuccess(true);
-    } catch (error) {
-      console.error("Screenshot error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    if (!captureResult) return;
-
-    try {
       // Use SnapDOM's built-in download functionality
-      await captureResult.download({
+      await result.download({
         format: imageFormat,
         filename: `screenshot-${Date.now()}`,
       });
     } catch (error) {
       console.error("Download error:", error);
+    } finally {
+      setDownloadLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col min-h-screen">
-      <div className="container mx-auto px-4 py-8 flex-grow">
-        <header className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4">s8t</h1>
-          <p className="text-xl text-muted-foreground">
-            Capture and customize website screenshots with ease
-          </p>
-        </header>
+    <>
+      <iframe
+        ref={contentRef}
+        onLoad={handleIframeLoad}
+        className="w-full border-0 p-0 m-0"
+        sandbox="allow-same-origin"
+      />
 
-        <div className="grid md:grid-cols-2 gap-8">
-          <div>
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="fixed top-4 left-4 z-50 bg-white/90 backdrop-blur-sm border rounded-lg p-2 shadow-lg hover:bg-white transition-colors"
+      >
+        {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+      </button>
+
+      <div
+        className={`fixed top-0 left-0 h-full w-full md:w-96 bg-white/95 backdrop-blur-sm border-r shadow-xl transform transition-transform duration-300 ease-in-out z-40 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="h-full overflow-y-auto">
+          <div className="p-6">
+            <header className="text-center mb-8 pt-8">
+              <h1 className="text-4xl font-bold mb-4">s8t</h1>
+              <p className="text-xl text-muted-foreground">
+                Capture and customize website screenshots with ease
+              </p>
+            </header>
+
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="url">Your website URL</Label>
@@ -209,7 +218,7 @@ export default function Home() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
                   <Label>Image format</Label>
                   <Select
@@ -249,28 +258,6 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="viewport-width">Viewport width</Label>
-                  <Input
-                    id="viewport-width"
-                    type="number"
-                    value={viewportWidth}
-                    onChange={(e) => setViewportWidth(+e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="viewport-height">Viewport height</Label>
-                  <Input
-                    id="viewport-height"
-                    type="number"
-                    value={viewportHeight}
-                    onChange={(e) => setViewportHeight(+e.target.value)}
-                  />
-                </div>
-              </div>
-
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Rendering..." : "Render"}
               </Button>
@@ -282,70 +269,48 @@ export default function Home() {
                       <Check className="w-5 h-5 text-green-600" />
                     </div>
                     <span className="font-medium">Success!</span>
-                    <div className="ml-auto text-xs text-muted-foreground">
-                      <a href="#" className="hover:underline">
-                        Privacy
-                      </a>
-                      {" · "}
-                      <a href="#" className="hover:underline">
-                        Terms
-                      </a>
-                    </div>
                   </div>
 
                   <Button
                     onClick={handleDownload}
                     className="w-full"
                     variant="outline"
-                    disabled={!captureResult}
+                    disabled={downloadLoading}
                   >
-                    Download Screenshot
+                    {downloadLoading
+                      ? "Capturing & Downloading..."
+                      : "Download Screenshot"}
                   </Button>
                 </div>
               )}
             </form>
-          </div>
 
-          <div className="border rounded-lg p-4 flex items-center justify-center bg-muted">
-            {screenshot ? (
-              <img src={screenshot} alt="Screenshot" className="max-w-full" />
-            ) : (
-              <div className="text-center">
-                <p className="text-lg font-semibold mb-2">Screenshot Preview</p>
-                <p className="text-sm text-muted-foreground">
-                  Your rendered screenshot will appear here
-                </p>
-              </div>
-            )}
+            <footer className="mt-12 py-6 border-t text-center text-sm text-muted-foreground">
+              s8t is powered by{" "}
+              <a
+                href="https://corsfix.com"
+                className="font-medium hover:underline"
+              >
+                Corsfix
+              </a>{" "}
+              •{" "}
+              <a
+                href="https://github.com/yourusername/s8t"
+                className="font-medium hover:underline"
+              >
+                Source code
+              </a>
+            </footer>
           </div>
-
-          {/* Hidden container for rendering content */}
-          <iframe
-            ref={contentRef}
-            onLoad={handleIframeLoad}
-            style={{ position: "absolute", top: "-9999px" }}
-            width={viewportWidth}
-            height={viewportHeight}
-            sandbox="allow-same-origin allow-scripts"
-          />
         </div>
       </div>
 
-      <footer className="mt-12 py-6 border-t">
-        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          s8t is powered by{" "}
-          <a href="https://corsfix.com" className="font-medium hover:underline">
-            Corsfix
-          </a>{" "}
-          •{" "}
-          <a
-            href="https://github.com/yourusername/s8t"
-            className="font-medium hover:underline"
-          >
-            Source code
-          </a>
-        </div>
-      </footer>
-    </div>
+      <div
+        className={`fixed inset-0 h-full w-full bg-black/20 z-30 transition-opacity duration-300 ${
+          sidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+        onClick={() => setSidebarOpen(false)}
+      />
+    </>
   );
 }
