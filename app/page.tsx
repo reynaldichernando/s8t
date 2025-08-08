@@ -187,8 +187,7 @@ export default function Home() {
       <iframe
         ref={contentRef}
         onLoad={handleIframeLoad}
-        width={window.innerWidth}
-        className="min-h-screen"
+        className="w-full min-h-screen"
         sandbox="allow-same-origin"
       />
 
