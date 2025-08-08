@@ -18,12 +18,10 @@ export default function Home() {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
-  const [url, setUrl] = useState("https://example.com");
+  const [url, setUrl] = useState("https://www.google.com/");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const contentRef = useRef<HTMLIFrameElement>(null);
-  const [imageFormat, setImageFormat] = useState<
-    "png" | "jpg" | "jpeg" | "webp"
-  >("png");
+  const [imageFormat, setImageFormat] = useState<"png" | "jpg" | "webp">("png");
   const [imageQuality, setImageQuality] = useState<"low" | "medium" | "high">(
     "medium"
   );
@@ -56,23 +54,16 @@ export default function Home() {
       });
 
       doc.querySelectorAll("link").forEach((link) => {
-        processRelativeUrl(link, "href");
+        if (link.getAttribute("rel") === "stylesheet") {
+          processRelativeUrl(link, "href");
+        } else {
+          link.remove();
+        }
       });
 
-      // Move all children from head to body (just before returning)
-      const headChildren = Array.from(doc.head.children);
-      headChildren.forEach((child) => {
-        doc.body.insertBefore(child, doc.body.firstChild);
-      });
+      doc.documentElement.style.overflowY = "hidden";
 
-      // Remove the head element
-      doc.head.remove();
-
-      const cleanHTML = doc.documentElement.outerHTML;
-
-      console.log(cleanHTML);
-
-      return cleanHTML;
+      return doc.documentElement.outerHTML;
     } catch (err) {
       console.error("Error processing HTML:", err);
       return html;
@@ -97,10 +88,9 @@ export default function Home() {
     }
   }, []);
 
-  // Auto-fetch example.com on component mount
   useEffect(() => {
-    fetchAndRenderWebsite("https://example.com");
-  }, [fetchAndRenderWebsite]);
+    fetchAndRenderWebsite(url);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,19 +105,13 @@ export default function Home() {
     try {
       const iframe = contentRef.current;
 
-      // Dynamic height adjustment based on content
-      const resizeIframe = () => {
-        if (iframe.contentWindow?.document.body) {
-          const contentHeight = iframe.contentWindow.document.body.scrollHeight;
-          // Only resize if content is taller than current iframe
-          if (contentHeight > iframe.offsetHeight) {
-            iframe.height = contentHeight + "px";
-          }
+      iframe.height = window.innerHeight.toString();
+      if (iframe.contentWindow?.document.body) {
+        const contentHeight = iframe.contentWindow.document.body.scrollHeight;
+        if (contentHeight > iframe.offsetHeight) {
+          iframe.height = contentHeight + "px";
         }
-      };
-
-      // Resize after a short delay to ensure content is fully loaded
-      setTimeout(resizeIframe, 100);
+      }
 
       // Just mark as successfully loaded, but don't capture yet
       setSuccess(true);
@@ -163,6 +147,7 @@ export default function Home() {
         compress: true,
         fast: true,
         quality: qualityValue,
+        type: imageFormat,
       });
 
       // Use SnapDOM's built-in download functionality
@@ -182,8 +167,8 @@ export default function Home() {
       <iframe
         ref={contentRef}
         onLoad={handleIframeLoad}
-        className="w-full border-0 p-0 m-0"
-        sandbox="allow-same-origin"
+        width={window.innerWidth}
+        className="min-h-screen"
       />
 
       <button
@@ -203,7 +188,7 @@ export default function Home() {
             <header className="text-center mb-8 pt-8">
               <h1 className="text-4xl font-bold mb-4">s8t</h1>
               <p className="text-xl text-muted-foreground">
-                Capture and customize website screenshots with ease
+                Capture website screenshots with ease
               </p>
             </header>
 
@@ -223,7 +208,7 @@ export default function Home() {
                   <Label>Image format</Label>
                   <Select
                     defaultValue="png"
-                    onValueChange={(value: "png" | "jpg" | "jpeg" | "webp") =>
+                    onValueChange={(value: "png" | "jpg" | "webp") =>
                       setImageFormat(value)
                     }
                   >
@@ -288,17 +273,24 @@ export default function Home() {
             <footer className="mt-12 py-6 border-t text-center text-sm text-muted-foreground">
               s8t is powered by{" "}
               <a
-                href="https://corsfix.com"
+                href="https://github.com/zumerlab/snapdom"
                 className="font-medium hover:underline"
               >
-                Corsfix
+                snapdom
               </a>{" "}
               •{" "}
               <a
-                href="https://github.com/yourusername/s8t"
+                href="https://corsfix.com"
                 className="font-medium hover:underline"
               >
-                Source code
+                cors proxy
+              </a>{" "}
+              •{" "}
+              <a
+                href="https://github.com/corsfix/s8t"
+                className="font-medium hover:underline"
+              >
+                source code
               </a>
             </footer>
           </div>
