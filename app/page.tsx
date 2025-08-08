@@ -83,7 +83,11 @@ export default function Home() {
     setError(null);
 
     try {
-      const response = await fetch(`https://proxy.corsfix.com/?${targetUrl}`);
+      const response = await fetch(`https://proxy.corsfix.com/?${targetUrl}`, {
+        headers: {
+          "x-corsfix-cache": "true",
+        },
+      });
 
       if (!response.ok) {
         throw new Error(
