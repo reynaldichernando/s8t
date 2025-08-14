@@ -140,9 +140,7 @@ export default function Home() {
       iframe.height = window.innerHeight.toString();
       if (iframe.contentWindow?.document.body) {
         const contentHeight = iframe.contentWindow.document.body.scrollHeight;
-        if (contentHeight > iframe.offsetHeight) {
-          iframe.height = contentHeight + "px";
-        }
+        iframe.height = contentHeight + "px";
       }
 
       // Just mark as successfully loaded, but don't capture yet
@@ -202,12 +200,14 @@ export default function Home() {
 
   return (
     <>
-      <iframe
-        ref={contentRef}
-        onLoad={handleIframeLoad}
-        className="min-h-screen"
-        sandbox="allow-same-origin"
-      />
+      <div className="h-0">
+        <iframe
+          ref={contentRef}
+          onLoad={handleIframeLoad}
+          className="min-h-screen"
+          sandbox="allow-same-origin"
+        />
+      </div>
 
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
