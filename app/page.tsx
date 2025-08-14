@@ -23,10 +23,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const contentRef = useRef<HTMLIFrameElement>(null);
-  const [imageFormat, setImageFormat] = useState<"png" | "jpg" | "webp">("png");
-  const [imageQuality, setImageQuality] = useState<"low" | "medium" | "high">(
-    "medium"
-  );
+  const [imageFormat, setImageFormat] = useState<"png" | "jpg" | "webp">("jpg");
   const [width, setWidth] = useState<WidthBreakpoint>(1280);
 
   const processHtml = (html: string, baseUrl: string) => {
@@ -165,10 +162,6 @@ export default function Home() {
         throw new Error("Could not access iframe content");
       }
 
-      // Convert quality setting to numeric value
-      const qualityValue =
-        imageQuality === "low" ? 0.3 : imageQuality === "medium" ? 0.7 : 0.9;
-
       // Use SnapDOM to capture the element
       const result = await snapdom(element, {
         useProxy: "https://proxy.corsfix.com/?url=",
@@ -176,7 +169,7 @@ export default function Home() {
         embedFonts: true,
         compress: true,
         fast: true,
-        quality: qualityValue,
+        quality: 0.3,
         type: imageFormat,
       });
 
@@ -265,7 +258,7 @@ export default function Home() {
                 <div className="space-y-2">
                   <Label>Image format</Label>
                   <Select
-                    defaultValue="png"
+                    defaultValue="jpg"
                     onValueChange={(value: "png" | "jpg" | "webp") =>
                       setImageFormat(value)
                     }
@@ -274,28 +267,9 @@ export default function Home() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="png">PNG</SelectItem>
                       <SelectItem value="jpg">JPG</SelectItem>
+                      <SelectItem value="png">PNG</SelectItem>
                       <SelectItem value="webp">WebP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Image quality</Label>
-                  <Select
-                    defaultValue="medium"
-                    onValueChange={(value: "low" | "medium" | "high") =>
-                      setImageQuality(value)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
