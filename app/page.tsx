@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { snapdom } from "@zumer/snapdom";
 
-type LoadingStep = "idle" | "loading-url" | "loading-iframe" | "generating";
+type LoadingStep = "idle" | "loading-url" | "loading-HTML" | "generating";
 
 const initialStateHtml = `
 <!DOCTYPE html>
@@ -248,7 +248,7 @@ export default function Home() {
       }
 
       // Step 2: Load into iframe (always needed for width/format changes)
-      setLoadingStep("loading-iframe");
+      setLoadingStep("loading-HTML");
       const element = await loadIframe(processedHtml);
 
       // Step 3: Generate image
@@ -353,15 +353,15 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mt-12">
+            <div className="mt-12 space-y-4">
               <Button
                 type="button"
                 onClick={render}
                 className="w-full"
                 disabled={loadingStep !== "idle"}
               >
-                {loadingStep === "loading-url" && "Loading URL..."}
-                {loadingStep === "loading-iframe" && "Loading into iframe..."}
+                {loadingStep === "loading-url" && "Fetching URL..."}
+                {loadingStep === "loading-HTML" && "Loading HTML..."}
                 {loadingStep === "generating" && "Generating image..."}
                 {loadingStep === "idle" && "Render"}
               </Button>
