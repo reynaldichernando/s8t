@@ -1,8 +1,9 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef } from "react";
 import { WIDTH_BREAKPOINTS, WidthBreakpoint } from "@/lib/width";
-import { Check, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,16 +16,75 @@ import {
 } from "@/components/ui/select";
 import { snapdom } from "@zumer/snapdom";
 
+type LoadingStep = "idle" | "loading-url" | "loading-iframe" | "generating";
+
+const initialStateHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>s8t - Ready to Capture</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        p {
+            font-size: 1.5rem;
+            margin: 0 0 1rem 0;
+            opacity: 0.9;
+            line-height: 1.5;
+        }
+        .cta {
+            font-size: 1.125rem;
+            opacity: 0.8;
+            display: inline-block;
+            text-align: left;
+        }
+        .cta li {
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p>Capture website screenshots</p>
+        <ol class="cta">
+            <li>Enter your URL</li>
+            <li>Click &quot;Render&quot;</li>
+            <li>Screenshot is ready</li>
+        </ol>
+    </div>
+</body>
+</html>
+`;
+
 export default function Home() {
-  const [success, setSuccess] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [downloadLoading, setDownloadLoading] = useState(false);
-  const [url, setUrl] = useState("https://www.apple.com/");
-  const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const contentRef = useRef<HTMLIFrameElement>(null);
-  const [imageFormat, setImageFormat] = useState<"png" | "jpg" | "webp">("jpg");
+  const [loadingStep, setLoadingStep] = useState<LoadingStep>("idle");
+
+  const [url, setUrl] = useState("https://www.apple.com/");
+  const [lastProcessedUrl, setLastProcessedUrl] = useState<string>("");
   const [width, setWidth] = useState<WidthBreakpoint>(1280);
+  const [imageFormat, setImageFormat] = useState<"png" | "jpg" | "webp">("jpg");
+
+  const [error, setError] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  const contentRef = useRef<HTMLIFrameElement>(null);
 
   const processHtml = (html: string, baseUrl: string) => {
     try {
@@ -76,118 +136,135 @@ export default function Home() {
     }
   };
 
-  const fetchAndRenderWebsite = useCallback(async (targetUrl: string) => {
-    setLoading(true);
-    setSuccess(false);
-    setError(null);
+  const fetchWebsite = async (targetUrl: string): Promise<string> => {
+    const response = await fetch(`https://proxy.corsfix.com/?${targetUrl}`, {
+      headers: {
+        "x-corsfix-cache": "true",
+      },
+    });
 
-    try {
-      const response = await fetch(`https://proxy.corsfix.com/?${targetUrl}`, {
-        headers: {
-          "x-corsfix-cache": "true",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to load website: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const html = await response.text();
-      const processedHtml = processHtml(html, targetUrl);
-
-      if (contentRef.current) {
-        contentRef.current.srcdoc = processedHtml;
-      }
-    } catch (error) {
-      console.error("Fetch error:", error);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to load the website. Please check the URL and try again."
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load website: ${response.status} ${response.statusText}`
       );
-      setLoading(false);
     }
-  }, []);
 
-  useEffect(() => {
-    fetchAndRenderWebsite(url);
-  }, []);
+    const html = await response.text();
+    return processHtml(html, targetUrl);
+  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const loadIframe = async (processedHtml: string): Promise<HTMLElement> => {
+    if (!contentRef.current) {
+      throw new Error("Iframe not available");
+    }
+
+    const iframe = contentRef.current;
+
+    return new Promise((resolve, reject) => {
+      iframe.onload = () => {
+        // Configure iframe dimensions
+        iframe.width = width.toString();
+
+        // hack for scaling to full width
+        const scale = window.innerWidth / iframe.offsetWidth;
+        iframe.style.transform = `scale(${scale})`;
+        iframe.style.transformOrigin = "top left";
+        iframe.style.marginBottom = `calc(${scale} - 1) * 100%)`;
+
+        // make height follow the whole html
+        iframe.height = window.innerHeight.toString();
+        if (iframe.contentWindow?.document.body) {
+          const contentHeight = iframe.contentWindow.document.body.scrollHeight;
+          iframe.height = contentHeight.toString();
+        }
+
+        const element = iframe.contentDocument?.documentElement;
+        if (!element) {
+          reject(new Error("Could not access iframe content"));
+          return;
+        }
+
+        resolve(element);
+      };
+
+      iframe.srcdoc = processedHtml;
+    });
+  };
+
+  const generateImage = async (element: HTMLElement) => {
+    const blob = await snapdom.toBlob(element, {
+      useProxy: "https://proxy.corsfix.com/?url=",
+      backgroundColor: "#fff",
+      embedFonts: true,
+      compress: true,
+      fast: true,
+      quality: 0.7,
+      type: imageFormat,
+    });
+
+    return URL.createObjectURL(blob);
+  };
+
+  const openInNewTab = () => {
+    if (imageUrl) {
+      window.open(imageUrl, "_blank");
+    }
+  };
+
+  const downloadImage = () => {
+    if (imageUrl) {
+      const a = document.createElement("a");
+      a.href = imageUrl;
+      a.download = `screenshot-${Date.now()}.${imageFormat}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
+  const render = async () => {
     if (!url.trim()) return;
-
-    await fetchAndRenderWebsite(url);
-  };
-
-  const handleIframeLoad = async () => {
-    if (!contentRef.current || !contentRef.current.srcdoc) return;
-
-    try {
-      const iframe = contentRef.current;
-
-      iframe.width = width.toString();
-      const scale = window.innerWidth / iframe.offsetWidth;
-      iframe.style.transform = `scale(${scale})`;
-      iframe.style.transformOrigin = "top left";
-      iframe.style.marginBottom = `calc(${scale} - 1) * 100%)`;
-
-      iframe.height = window.innerHeight.toString();
-      if (iframe.contentWindow?.document.body) {
-        const contentHeight = iframe.contentWindow.document.body.scrollHeight;
-        iframe.height = contentHeight + "px";
-      }
-
-      // Just mark as successfully loaded, but don't capture yet
-      setSuccess(true);
-    } catch (error) {
-      console.error("Iframe load error:", error);
-    } finally {
-      setLoading(false);
+    setError(null);
+    // Clear previous result
+    if (imageUrl) {
+      URL.revokeObjectURL(imageUrl);
     }
-  };
-
-  const handleDownload = async () => {
-    if (!contentRef.current) return;
-
-    setDownloadLoading(true);
+    setImageUrl(null);
 
     try {
-      const iframe = contentRef.current;
-      const element = iframe.contentDocument?.documentElement;
+      let processedHtml: string;
 
-      if (!element) {
-        throw new Error("Could not access iframe content");
+      if (url !== lastProcessedUrl) {
+        // Step 1: Fetch website
+        setLoadingStep("loading-url");
+        processedHtml = await fetchWebsite(url);
+        setLastProcessedUrl(url);
+      } else {
+        // Use cached HTML - we need to get it from the current iframe
+        if (!contentRef.current?.srcdoc) {
+          throw new Error("No cached content available");
+        }
+        processedHtml = contentRef.current.srcdoc;
       }
 
-      // Use SnapDOM to capture the element
-      const result = await snapdom(element, {
-        useProxy: "https://proxy.corsfix.com/?url=",
-        backgroundColor: "#fff",
-        embedFonts: true,
-        compress: true,
-        fast: true,
-        quality: 0.3,
-        type: imageFormat,
-      });
+      // Step 2: Load into iframe (always needed for width/format changes)
+      setLoadingStep("loading-iframe");
+      const element = await loadIframe(processedHtml);
 
-      // Use SnapDOM's built-in download functionality
-      await result.download({
-        format: imageFormat,
-        filename: `screenshot-${Date.now()}`,
-        useProxy: "https://proxy.corsfix.com/?url=",
-      });
+      // Step 3: Generate image
+      setLoadingStep("generating");
+      const newImageUrl = await generateImage(element);
+
+      setImageUrl(newImageUrl);
+      setLoadingStep("idle");
     } catch (error) {
-      console.error("Download error:", error);
+      console.error("Render error:", error);
       setError(
         error instanceof Error
           ? error.message
-          : "Failed to download screenshot. Please try again."
+          : "Failed to process screenshot. Please try again."
       );
-    } finally {
-      setDownloadLoading(false);
+      setLoadingStep("idle");
     }
   };
 
@@ -196,9 +273,10 @@ export default function Home() {
       <div className="h-0">
         <iframe
           ref={contentRef}
-          onLoad={handleIframeLoad}
           className="min-h-screen"
           sandbox="allow-same-origin"
+          srcDoc={initialStateHtml}
+          width="100%"
         />
       </div>
 
@@ -210,7 +288,7 @@ export default function Home() {
       </button>
 
       <div
-        className={`fixed top-0 left-0 h-full w-full md:w-96 bg-white/95 backdrop-blur-sm border-r shadow-xl transform transition-transform duration-300 ease-in-out z-40 ${
+        className={`fixed top-0 left-0 h-full w-full md:max-w-lg bg-white/95 backdrop-blur-sm border-r shadow-xl transform transition-transform duration-300 ease-in-out z-40 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
@@ -223,9 +301,9 @@ export default function Home() {
               </p>
             </header>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="url">Your website URL</Label>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="url">Website URL</Label>
                 <Input
                   id="url"
                   placeholder="https://example.com"
@@ -234,49 +312,58 @@ export default function Home() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                <div className="space-y-2">
-                  <Label>Width</Label>
-                  <Select
-                    defaultValue={width.toString()}
-                    onValueChange={(value) =>
-                      setWidth(Number(value) as WidthBreakpoint)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {WIDTH_BREAKPOINTS.map((bp) => (
-                        <SelectItem key={bp} value={bp.toString()}>
-                          {bp}px
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Image format</Label>
-                  <Select
-                    defaultValue="jpg"
-                    onValueChange={(value: "png" | "jpg" | "webp") =>
-                      setImageFormat(value)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="jpg">JPG</SelectItem>
-                      <SelectItem value="png">PNG</SelectItem>
-                      <SelectItem value="webp">WebP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-1">
+                <Label>Width</Label>
+                <Select
+                  defaultValue={width.toString()}
+                  onValueChange={(value) =>
+                    setWidth(Number(value) as WidthBreakpoint)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WIDTH_BREAKPOINTS.map((bp) => (
+                      <SelectItem key={bp} value={bp.toString()}>
+                        {bp}px
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Rendering..." : "Render"}
+              <div className="space-y-1">
+                <Label>Image format</Label>
+                <Select
+                  defaultValue="jpg"
+                  onValueChange={(value: "png" | "jpg" | "webp") =>
+                    setImageFormat(value)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="jpg">JPG</SelectItem>
+                    <SelectItem value="png">PNG</SelectItem>
+                    <SelectItem value="webp">WebP</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="mt-12">
+              <Button
+                type="button"
+                onClick={render}
+                className="w-full"
+                disabled={loadingStep !== "idle"}
+              >
+                {loadingStep === "loading-url" && "Loading URL..."}
+                {loadingStep === "loading-iframe" && "Loading into iframe..."}
+                {loadingStep === "generating" && "Generating image..."}
+                {loadingStep === "idle" && "Render"}
               </Button>
 
               {error && (
@@ -288,31 +375,36 @@ export default function Home() {
                 </div>
               )}
 
-              {success && (
+              {imageUrl && (
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 border rounded-lg p-4">
-                    <div className="bg-green-100 rounded-full p-1">
-                      <Check className="w-5 h-5 text-green-600" />
+                  <div className="border rounded-lg p-4 bg-gray-50">
+                    <h3 className="font-medium mb-3">Generated Screenshot</h3>
+                    <div className="flex justify-center mb-4">
+                      <img
+                        src={imageUrl}
+                        alt="Generated screenshot"
+                        className="max-w-full max-h-96 rounded border shadow-sm"
+                      />
                     </div>
-                    <span className="font-medium">Success!</span>
+                    <div className="flex gap-2 justify-center">
+                      <Button
+                        onClick={openInNewTab}
+                        variant="outline"
+                        size="sm"
+                      >
+                        Open in New Tab
+                      </Button>
+                      <Button onClick={downloadImage} size="sm">
+                        Download
+                      </Button>
+                    </div>
                   </div>
-
-                  <Button
-                    onClick={handleDownload}
-                    className="w-full"
-                    variant="outline"
-                    disabled={downloadLoading}
-                  >
-                    {downloadLoading
-                      ? "Capturing & Downloading..."
-                      : "Download Screenshot"}
-                  </Button>
                 </div>
               )}
-            </form>
+            </div>
 
             <footer className="mt-12 py-6 border-t text-center text-sm text-muted-foreground">
-              s8t is powered by{" "}
+              powered by{" "}
               <a
                 href="https://github.com/zumerlab/snapdom"
                 className="font-medium hover:underline"
@@ -324,7 +416,7 @@ export default function Home() {
                 href="https://corsfix.com"
                 className="font-medium hover:underline"
               >
-                cors proxy
+                cors proxy by corsfix
               </a>{" "}
               •{" "}
               <a
